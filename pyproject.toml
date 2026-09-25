@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pocket-sync"
+version = "1.0.0"
+description = "Syncs Pocket recordings (audio, transcripts, summaries) into a local NAS archive"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.27,<1",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "tenacity>=8.3",
+    "structlog>=24.1",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+]
+
+[project.scripts]
+pocket-sync = "pocket_sync.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pocket_sync"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

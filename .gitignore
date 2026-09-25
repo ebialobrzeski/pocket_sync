@@ -1,0 +1,12 @@
+.env
+*.env.local
+pocket_api_key.txt
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.scratch/
+data/
+dist/
+build/
