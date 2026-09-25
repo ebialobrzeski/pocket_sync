@@ -19,10 +19,10 @@ services:
       TZ: ${TZ:-UTC}
       # POCKET_API_KEY_FILE: /run/secrets/pocket_api_key
     volumes:
-      # SSD share: metadata (/data/meta) and state DB + logs (/data/state)
-      - ${POCKET_SSD_PATH:?set POCKET_SSD_PATH in .env}:/data
-      # HDD share: audio files
-      - ${POCKET_HDD_PATH:?set POCKET_HDD_PATH in .env}:/audio
+      # Data: metadata (/data/meta) and state DB + logs (/data/state)
+      - ${POCKET_DATA_PATH:?set POCKET_DATA_PATH in .env}:/data
+      # Audio files
+      - ${POCKET_AUDIO_PATH:?set POCKET_AUDIO_PATH in .env}:/audio
     # secrets:
     #   - pocket_api_key
     logging:

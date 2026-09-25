@@ -49,10 +49,10 @@ def test_relative_dir_sanitizes_id():
 
 
 def test_same_relative_path_in_both_trees(tmp_path):
-    storage = Storage(tmp_path / "ssd" / "meta", tmp_path / "hdd" / "audio")
+    storage = Storage(tmp_path / "data" / "meta", tmp_path / "audio")
     rel = PurePosixPath("2026/09/x_id")
-    assert storage.meta_dir(rel).relative_to(tmp_path / "ssd" / "meta") == storage.audio_dir(rel).relative_to(
-        tmp_path / "hdd" / "audio"
+    assert storage.meta_dir(rel).relative_to(tmp_path / "data" / "meta") == storage.audio_dir(rel).relative_to(
+        tmp_path / "audio"
     )
 
 

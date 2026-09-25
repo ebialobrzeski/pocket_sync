@@ -3,9 +3,9 @@
 Kontener Dockera, który okresowo synchronizuje nagrania z [Pocket](https://heypocketai.com)
 do lokalnego archiwum na NAS-ie:
 
-- **audio** (`.ogg` / `.mp3`) trafia na HDD,
+- **audio** (`.ogg` / `.mp3`) trafia do katalogu audio,
 - **metadane** (`raw.json`, transkrypcja, podsumowanie, action items, `.meta.json`) oraz baza stanu
-  trafiają na SSD.
+  trafiają do katalogu danych.
 
 Oba drzewa mają identyczną strukturę względną `RRRR/MM/RRRR-MM-DD_HHMM_<tytuł>_<id>/`.
 Narzędzie jest idempotentne i odporne na restart. Audio jest zapisywane przez plik `.part`
@@ -23,11 +23,11 @@ W Dockhand wystarczy dodać stack z repozytorium Git `https://github.com/ebialob
 
 ### 1. Katalogi na NAS-ie
 
-Utwórz dwa udziały lub katalogi i ustal UID/GID ich właściciela (`id <użytkownik>` przez SSH):
+Utwórz dwa katalogi (mogą leżeć na tym samym lub na różnych wolumenach) i ustal UID/GID ich właściciela (`id <użytkownik>` przez SSH):
 
 ```
-/volume1/docker/pocket-sync    # SSD: tu powstaną meta/ i state/
-/volume2/pocket-audio          # HDD: pliki audio (w kontenerze /audio)
+/volume1/docker/pocket-sync    # dane: tu powstaną meta/ i state/ (w kontenerze /data)
+/volume2/pocket-audio          # audio: pliki audio (w kontenerze /audio)
 ```
 
 ### 2. Zmienne środowiskowe
@@ -37,8 +37,8 @@ Utwórz `.env` obok `docker-compose.yml` na podstawie [.env.example](.env.exampl
 
 ```env
 POCKET_API_KEY=pk_...
-POCKET_SSD_PATH=/volume1/docker/pocket-sync
-POCKET_HDD_PATH=/volume2/pocket-audio
+POCKET_DATA_PATH=/volume1/docker/pocket-sync
+POCKET_AUDIO_PATH=/volume2/pocket-audio
 PUID=1000
 PGID=1000
 TZ=Europe/Warsaw
@@ -70,7 +70,7 @@ docker compose run --rm -e RUN_ONCE=true pocket-sync                      # jede
 ```
 
 `verify` zwraca kod 0 dla zdrowego archiwum i 1 po wykryciu problemów, więc można go podpiąć
-pod cron. Wykrywa brakujące i niezgodne pliki audio, rozjazd drzew HDD/SSD oraz osierocone `.part`.
+pod cron. Wykrywa brakujące i niezgodne pliki audio, rozjazd drzew audio i metadanych oraz osierocone `.part`.
 
 Kody wyjścia: `0` OK, `1` problemy (nieudane nagrania / verify), `2` błąd konfiguracji
 (np. brak klucza), `3` niedostępny storage.
@@ -81,10 +81,10 @@ Kody wyjścia: `0` OK, `1` problemy (nieudane nagrania / verify), `2` błąd kon
 |---|---|---|
 | `POCKET_API_KEY` | — | klucz `pk_...`, wymagany (albo `POCKET_API_KEY_FILE`) |
 | `POCKET_API_BASE` | `https://public.heypocketai.com/api/v1` | bazowy adres API |
-| `META_DIR` | `/data/meta/pocket` | drzewo metadanych (SSD) |
-| `STATE_DIR` | `/data/state` | baza stanu i logi (SSD) |
-| `AUDIO_DIR` | `/audio` | drzewo audio (HDD) |
-| `DOWNLOAD_AUDIO` | `true` | `false` pomija całą gałąź HDD |
+| `META_DIR` | `/data/meta/pocket` | drzewo metadanych |
+| `STATE_DIR` | `/data/state` | baza stanu i logi |
+| `AUDIO_DIR` | `/audio` | drzewo audio |
+| `DOWNLOAD_AUDIO` | `true` | `false` pomija pobieranie audio |
 | `SYNC_INTERVAL_MINUTES` | `15` | odstęp między przebiegami |
 | `RUN_ONCE` | `false` | jeden przebieg i wyjście |
 | `MAX_CONCURRENCY` | `3` | równolegle przetwarzane nagrania |
@@ -97,17 +97,17 @@ Kody wyjścia: `0` OK, `1` problemy (nieudane nagrania / verify), `2` błąd kon
 ## Układ archiwum
 
 ```
-SSD  /data/meta/pocket/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
-         raw.json          pełna odpowiedź API (źródło prawdy)
-         transcript.json   segmenty z timestampami (i mówcami, jeśli są)
-         transcript.md
-         summary.md        wszystkie podsumowania AI
-         actions.json      action items
-         .meta.json        ścieżka audio względem udziału HDD, SHA-256, rozmiar, hashe plików, wersja narzędzia
-     /data/state/pocket-sync.db
+dane   /data/meta/pocket/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
+           raw.json          pełna odpowiedź API (źródło prawdy)
+           transcript.json   segmenty z timestampami (i mówcami, jeśli są)
+           transcript.md
+           summary.md        wszystkie podsumowania AI
+           actions.json      action items
+           .meta.json        ścieżka audio względem katalogu audio, SHA-256, rozmiar, hashe plików, wersja narzędzia
+       /data/state/pocket-sync.db
 
-HDD  /audio/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
-         audio.ogg
+audio  /audio/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
+           audio.ogg
 ```
 
 ## Jak działa przebieg

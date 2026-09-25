@@ -1,4 +1,4 @@
-"""Path layout shared by the SSD (metadata) and HDD (audio) trees.
+"""Path layout shared by the metadata and audio trees.
 
 Both trees use the same relative directory, computed only by `relative_dir()`. Nothing here
 derives a path in one tree from a path in the other.

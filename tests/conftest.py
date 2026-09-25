@@ -181,9 +181,9 @@ async def no_sleep(_: float) -> None:
 
 @pytest.fixture
 def dirs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
-    ssd = tmp_path_factory.mktemp("ssd")
-    hdd = tmp_path_factory.mktemp("hdd")
-    return {"meta": ssd / "meta" / "pocket", "state": ssd / "state", "audio": hdd / "pocket-audio"}
+    data = tmp_path_factory.mktemp("data")
+    audio = tmp_path_factory.mktemp("audio")
+    return {"meta": data / "meta" / "pocket", "state": data / "state", "audio": audio / "pocket-audio"}
 
 
 @pytest.fixture
