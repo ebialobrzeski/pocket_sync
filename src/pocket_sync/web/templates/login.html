@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Log in · Pocket archive{% endblock %}
+{% block body_class %}login-page{% endblock %}
+{% block header %}{% endblock %}
+{% block content %}
+<form class="card login-card" method="post" action="/login">
+  <div class="brand brand-lg">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm-7 9a1 1 0 1 1 2 0 5 5 0 0 0 10 0 1 1 0 1 1 2 0 7 7 0 0 1-6 6.93V21a1 1 0 1 1-2 0v-2.07A7 7 0 0 1 5 12Z"/></svg>
+    Pocket archive
+  </div>
+  {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label class="field">
+    <span>Password</span>
+    <input type="password" name="password" autocomplete="current-password" required autofocus>
+  </label>
+  <button class="btn btn-primary btn-block" type="submit">Log in</button>
+</form>
+{% endblock %}

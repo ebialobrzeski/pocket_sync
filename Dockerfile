@@ -23,6 +23,8 @@ RUN useradd --uid 1000 --user-group --no-create-home --shell /usr/sbin/nologin a
     && chown -R 1000:1000 /data /audio
 USER 1000:1000
 WORKDIR /data
+# Web UI (`web` command); the sync loop does not listen on any port.
+EXPOSE 8080
 HEALTHCHECK --interval=5m --timeout=30s --start-period=5m --retries=2 \
     CMD ["python", "-m", "pocket_sync", "healthcheck"]
 ENTRYPOINT ["python", "-m", "pocket_sync"]
