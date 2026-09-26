@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Sync · Pocket archive{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>Sync</h1>
+  <div class="head-actions">
+    <form method="post" action="/settings/pause">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% if current.sync_paused %}
+      <input type="hidden" name="paused" value="false">
+      <button class="btn" type="submit">Resume schedule</button>
+      {% else %}
+      <input type="hidden" name="paused" value="true">
+      <button class="btn btn-ghost" type="submit">Pause schedule</button>
+      {% endif %}
+    </form>
+    <form method="post" action="/sync-now">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn btn-primary" type="submit">Sync now</button>
+    </form>
+  </div>
+</div>
+
+<section class="card" id="status" data-refresh="/settings/status">
+  {% include "_status.html" %}
+</section>
+
+<div class="settings-grid">
+  <section class="card">
+    <h2>Settings</h2>
+    <p class="muted small">Saved in <code>{{ cfg.state_dir }}/settings.json</code> and applied from the next pass, without restarting. Values that match the environment (<code>.env</code>) are not stored.</p>
+    <form method="post" action="/settings" class="settings-form">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      {% set labels = {
+        'download_audio': ('Download audio', 'Store audio files in the audio directory. When off, only transcripts and summaries are synced.'),
+        'sync_interval_minutes': ('Sync interval', 'Minutes between sync passes.'),
+        'max_concurrency': ('Parallel downloads', 'Recordings processed at the same time (1–20).'),
+        'full_refresh_hours': ('Full refresh', 'Hours between re-fetching details of every recording, to catch updated summaries. 0 disables.'),
+      } %}
+      {% for f in fields %}
+      {% set label, help = labels[f.name] %}
+      <div class="setting">
+        {% if f.name == 'download_audio' %}
+        <label class="switch">
+          <input type="checkbox" name="{{ f.name }}" value="true" {{ 'checked' if f.value }}>
+          <span class="switch-ui" aria-hidden="true"></span>
+          <span class="setting-label">{{ label }}</span>
+        </label>
+        {% else %}
+        <label class="setting-label" for="f-{{ f.name }}">{{ label }}</label>
+        <div class="input-unit">
+          <input id="f-{{ f.name }}" type="number" name="{{ f.name }}" value="{{ f.value | num }}"
+            {% if f.name == 'max_concurrency' %}min="1" max="20" step="1"{% elif f.name == 'full_refresh_hours' %}min="0" step="any"{% else %}min="1" step="any"{% endif %} required>
+          <span class="unit">{{ {'sync_interval_minutes': 'min', 'full_refresh_hours': 'h'}.get(f.name, '') }}</span>
+        </div>
+        {% endif %}
+        <div class="setting-help">{{ help }}
+          {% if f.overridden %}<span class="badge badge-accent" title="Value from the environment: {{ f.default | num }}">changed · env: {{ f.default | num }}</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit" name="action" value="save">Save</button>
+        <button class="btn btn-ghost" type="submit" name="action" value="reset" data-confirm="Reset all settings to the values from the environment?">Reset to environment</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Configuration</h2>
+    <p class="muted small">From the environment; change these in <code>.env</code> and restart the containers.</p>
+    <dl class="kv">
+      <dt>API key</dt><dd>{% if cfg.pocket_api_key or cfg.pocket_api_key_file %}configured{% else %}<span class="text-error">not set</span>{% endif %}</dd>
+      <dt>API base</dt><dd><code class="wrap-any">{{ cfg.pocket_api_base }}</code></dd>
+      <dt>Metadata</dt><dd><code class="wrap-any">{{ cfg.meta_dir }}</code></dd>
+      <dt>Audio</dt><dd><code class="wrap-any">{{ cfg.audio_dir }}</code></dd>
+      <dt>State</dt><dd><code class="wrap-any">{{ cfg.state_dir }}</code></dd>
+      <dt>Time zone</dt><dd>{{ cfg.tz }}</dd>
+      <dt>Version</dt><dd>{{ version }}</dd>
+    </dl>
+  </section>
+</div>
+
+{% if status.attention %}
+<section class="card">
+  <h2>Recordings needing attention</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Recording</th><th>Errors</th><th>Last attempt</th><th>Last error</th><th></th></tr></thead>
+    <tbody>
+    {% for r in status.attention %}
+    <tr>
+      <td><a href="/recordings/{{ r['id'] | urlencode }}">{{ r['title'] or r['id'] }}</a></td>
+      <td>{{ r['error_count'] }}</td>
+      <td class="nowrap">{{ r['last_attempt_at'] | ago }}</td>
+      <td class="error-text">{{ r['last_error'] or '' }}</td>
+      <td>
+        <form method="post" action="/recordings/{{ r['id'] | urlencode }}/resync">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <input type="hidden" name="next" value="/settings">
+          <button class="btn btn-sm" type="submit">Retry</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>Recent passes</h2>
+  {% if status.runs %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Started</th><th>Duration</th><th>Status</th><th class="num">Synced</th><th class="num">Unchanged</th><th class="num">Failed</th><th class="num">Downloaded</th></tr></thead>
+    <tbody>
+    {% for run in status.runs %}
+    <tr>
+      <td class="nowrap">{{ run['started_at'] | dt }}</td>
+      <td class="nowrap">{{ run | run_duration }}</td>
+      <td><span class="badge badge-{{ {'ok': 'ok', 'partial': 'warn', 'failed': 'error', 'aborted': 'muted', 'running': 'accent'}.get(run['status'], 'muted') }}">{{ run['status'] }}</span>
+        {% if run['error'] %}<div class="error-text small">{{ run['error'] }}</div>{% endif %}</td>
+      <td class="num">{{ run['processed'] }}</td>
+      <td class="num">{{ run['skipped'] }}</td>
+      <td class="num">{{ run['failed'] }}</td>
+      <td class="num">{{ run['bytes_downloaded'] | size if run['bytes_downloaded'] else '—' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No sync passes recorded yet. Is the sync container running?</p>
+  {% endif %}
+</section>
+{% endblock %}

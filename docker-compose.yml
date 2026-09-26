@@ -1,19 +1,33 @@
 # Built locally from this repository (e.g. a Dockhand Git stack): the image is built from ./Dockerfile.
 # Needs a `.env` next to this file (see .env.example), then:
 #   docker compose up -d --build
+#
+# Two services from the same image:
+#   pocket-sync      the sync loop
+#   pocket-sync-web  the web UI (http://<nas>:${WEB_PORT:-8080}), needs WEB_PASSWORD
+# Both read the same .env and share /data (state DB, runtime settings from the UI).
+
+x-common: &common
+  image: pocket-sync:local
+  build:
+    context: .
+  pull_policy: build
+  restart: unless-stopped
+  user: "${PUID:-1000}:${PGID:-1000}"
+  env_file:
+    # Optional: variables may instead come from the stack configuration (e.g. Dockhand).
+    - path: .env
+      required: false
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   pocket-sync:
-    image: pocket-sync:local
-    build:
-      context: .
-    pull_policy: build
+    <<: *common
     container_name: pocket-sync
-    restart: unless-stopped
-    user: "${PUID:-1000}:${PGID:-1000}"
-    env_file:
-      # Optional: variables may instead come from the stack configuration (e.g. Dockhand).
-      - path: .env
-        required: false
     environment:
       POCKET_API_KEY: ${POCKET_API_KEY:-}
       TZ: ${TZ:-UTC}
@@ -25,11 +39,28 @@ services:
       - ${POCKET_AUDIO_PATH:?set POCKET_AUDIO_PATH in .env}:/audio
     # secrets:
     #   - pocket_api_key
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+
+  pocket-sync-web:
+    <<: *common
+    container_name: pocket-sync-web
+    command: ["web"]
+    environment:
+      POCKET_API_KEY: ${POCKET_API_KEY:-}
+      TZ: ${TZ:-UTC}
+      WEB_PASSWORD: ${WEB_PASSWORD:?set WEB_PASSWORD in .env}
+      WEB_PORT: ${WEB_PORT:-8080}
+    ports:
+      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
+    volumes:
+      # Read-write: the UI saves sync settings and "sync now" requests in /data/state
+      - ${POCKET_DATA_PATH:?set POCKET_DATA_PATH in .env}:/data
+      - ${POCKET_AUDIO_PATH:?set POCKET_AUDIO_PATH in .env}:/audio:ro
+    healthcheck:
+      test: ["CMD", "python", "-m", "pocket_sync", "web-healthcheck"]
+      interval: 1m
+      timeout: 15s
+      start_period: 30s
+      retries: 3
 
 # secrets:
 #   pocket_api_key:

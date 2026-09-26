@@ -1,39 +1,48 @@
 # pocket-sync
 
-Kontener Dockera, który okresowo synchronizuje nagrania z [Pocket](https://heypocketai.com)
-do lokalnego archiwum na NAS-ie:
+A Docker container that periodically syncs recordings from [Pocket](https://heypocketai.com)
+into a local archive on a NAS, plus a small web UI for browsing that archive:
 
-- **audio** (`.ogg` / `.mp3`) trafia do katalogu audio,
-- **metadane** (`raw.json`, transkrypcja, podsumowanie, action items, `.meta.json`) oraz baza stanu
-  trafiają do katalogu danych.
+- **audio** (`.ogg` / `.mp3`) goes to the audio directory,
+- **metadata** (`raw.json`, transcript, summary, action items, `.meta.json`) and the state
+  database go to the data directory,
+- the **web UI** lets you listen to recordings, read transcripts and summaries, and manage the sync.
 
-Oba drzewa mają identyczną strukturę względną `RRRR/MM/RRRR-MM-DD_HHMM_<tytuł>_<id>/`.
-Narzędzie jest idempotentne i odporne na restart. Audio jest zapisywane przez plik `.part`
-z weryfikacją rozmiaru i SHA-256, więc przerwany transfer nigdy nie zostawia uszkodzonego pliku.
+Both trees share the same relative layout `YYYY/MM/YYYY-MM-DD_HHMM_<title>_<id>/`.
+The tool is idempotent and safe to restart. Audio is written through a `.part` file and verified
+by size and SHA-256, so an interrupted transfer never leaves a corrupted file behind.
 
-Szczegóły API: [docs/api-notes.md](docs/api-notes.md). Plan projektu:
+API details: [docs/api-notes.md](docs/api-notes.md). Project plan:
 [pocket-nas-sync-plan.md](pocket-nas-sync-plan.md).
 
-## Deployment prosto z GitHuba
+## Deploying straight from GitHub
 
-Obraz jest budowany lokalnie na NAS-ie z [Dockerfile](Dockerfile) w repozytorium
-(`build: .` w [docker-compose.yml](docker-compose.yml)). Nie jest potrzebny żaden rejestr obrazów.
-W Dockhand wystarczy dodać stack z repozytorium Git `https://github.com/ebialobrzeski/pocket_sync.git`
-(gałąź `main`, plik `docker-compose.yml`).
+The image is built locally on the NAS from the [Dockerfile](Dockerfile) in this repository
+(`build: .` in [docker-compose.yml](docker-compose.yml)). No image registry is needed.
+In Dockhand, add a stack from the Git repository `https://github.com/ebialobrzeski/pocket_sync.git`
+(branch `main`, file `docker-compose.yml`).
 
-### 1. Katalogi na NAS-ie
+The stack has two services built from the same image:
 
-Utwórz dwa katalogi (mogą leżeć na tym samym lub na różnych wolumenach) i ustal UID/GID ich właściciela (`id <użytkownik>` przez SSH):
+| service | what it does |
+|---|---|
+| `pocket-sync` | the sync loop |
+| `pocket-sync-web` | the web UI on port `WEB_PORT` (default `8080`) |
+
+### 1. Directories on the NAS
+
+Create two directories (on the same or on different volumes) and find the UID/GID of their owner
+(`id <user>` over SSH):
 
 ```
-/volume1/docker/pocket-sync    # dane: tu powstaną meta/ i state/ (w kontenerze /data)
-/volume2/pocket-audio          # audio: pliki audio (w kontenerze /audio)
+/volume1/docker/pocket-sync    # data: meta/ and state/ are created here (/data in the container)
+/volume2/pocket-audio          # audio files (/audio in the container)
 ```
 
-### 2. Zmienne środowiskowe
+### 2. Environment variables
 
-Utwórz `.env` obok `docker-compose.yml` na podstawie [.env.example](.env.example)
-(albo ustaw te zmienne w konfiguracji stacka w Dockhand):
+Create `.env` next to `docker-compose.yml` from [.env.example](.env.example)
+(or set these variables in the Dockhand stack configuration):
 
 ```env
 POCKET_API_KEY=pk_...
@@ -42,101 +51,155 @@ POCKET_AUDIO_PATH=/volume2/pocket-audio
 PUID=1000
 PGID=1000
 TZ=Europe/Warsaw
+WEB_PASSWORD=choose-a-long-password
 ```
 
-Plik `.env` powinien mieć uprawnienia `600` i nigdy nie trafia do repozytorium.
+`.env` should have `600` permissions and never be committed to the repository.
 
-### 3. Uruchomienie
+### 3. Start
 
 ```sh
 docker compose up -d --build
 docker compose logs -f
 ```
 
-Aktualizacja: `git pull` (lub redeploy stacka w Dockhand) i ponownie `docker compose up -d --build`.
+Then open `http://<nas>:8080` and log in with `WEB_PASSWORD`.
 
-### Docker secret zamiast zmiennej
+To update: `git pull` (or redeploy the stack in Dockhand), then run `docker compose up -d --build` again.
 
-Zamiast `POCKET_API_KEY` można przekazać `POCKET_API_KEY_FILE=/run/secrets/pocket_api_key`
-(przykład zakomentowany w `docker-compose.yml`).
+### Docker secret instead of a variable
 
-## Polecenia
+Instead of `POCKET_API_KEY` you can pass `POCKET_API_KEY_FILE=/run/secrets/pocket_api_key`
+(example commented out in `docker-compose.yml`). The same works for `WEB_PASSWORD_FILE`.
+
+## Web UI
+
+- **Recordings**: all recordings grouped by month, newest first. Search matches titles, or
+  titles, transcripts and summaries when you tick the checkbox. Search ignores case and diacritics,
+  so `lodz` finds `Łódź`.
+- **Recording page**: audio player with ±15 s skip buttons and playback speed; rendered summary
+  (every summarization, if there are several); action items; and a transcript with timestamps.
+  Click a timestamp to jump to that moment. The current segment is highlighted and followed while
+  playing. The page also has a "find in transcript" filter, links to the raw files
+  (`summary.md`, `transcript.json`, `raw.json`, …) and a **Re-sync** button that makes the next
+  pass fetch the recording again.
+- **Sync**: live status (idle / syncing / paused / not responding, last successful pass, next pass),
+  **Sync now**, **Pause / Resume schedule**, recordings with sync errors (with **Retry**), recent
+  passes, and a settings form.
+
+### Sync settings from the UI
+
+These settings can be changed in the UI without restarting anything:
+download audio, sync interval, parallel downloads and full refresh interval, plus pause.
+They are stored in `STATE_DIR/settings.json` and take precedence over the environment. Only values
+that differ from the environment are stored, and **Reset to environment** removes them.
+The sync loop re-reads them before every pass. While it waits between passes it checks every few
+seconds for "Sync now" requests (the `STATE_DIR/sync-now` file) and for a changed interval.
+
+Paths, the API key and the time zone stay environment-only.
+
+### Security
+
+- Protected by a single master password (`WEB_PASSWORD`, at least 8 characters). The session is a
+  signed cookie (HttpOnly, SameSite=Lax) valid for `WEB_SESSION_HOURS`. Changing the password
+  logs out every session.
+- After 10 failed logins within 15 minutes, a client is blocked for the rest of that window.
+- Forms carry CSRF tokens, and responses send a strict Content-Security-Policy.
+- The UI serves plain HTTP. To reach it from outside your LAN, put it behind a reverse proxy with
+  HTTPS (e.g. the Synology reverse proxy) and set `WEB_COOKIE_SECURE=true`.
+- The audio directory is mounted read-only in the web container.
+
+## Commands
 
 ```sh
-docker compose exec pocket-sync python -m pocket_sync verify              # spójność archiwum
-docker compose exec pocket-sync python -m pocket_sync verify --checksums  # + SHA-256 audio
+docker compose exec pocket-sync python -m pocket_sync verify              # archive consistency
+docker compose exec pocket-sync python -m pocket_sync verify --checksums  # + SHA-256 of audio
 docker compose exec pocket-sync python -m pocket_sync healthcheck
-docker compose run --rm -e RUN_ONCE=true pocket-sync                      # jeden przebieg
+docker compose run --rm -e RUN_ONCE=true pocket-sync                      # a single pass
 ```
 
-`verify` zwraca kod 0 dla zdrowego archiwum i 1 po wykryciu problemów, więc można go podpiąć
-pod cron. Wykrywa brakujące i niezgodne pliki audio, rozjazd drzew audio i metadanych oraz osierocone `.part`.
+`verify` exits 0 for a healthy archive and 1 when it finds problems, so it can be hooked into
+cron. It detects missing and mismatching audio files, divergence between the audio and metadata
+trees, and orphaned `.part` files.
 
-Kody wyjścia: `0` OK, `1` problemy (nieudane nagrania / verify), `2` błąd konfiguracji
-(np. brak klucza), `3` niedostępny storage.
+Exit codes: `0` OK, `1` problems (failed recordings / verify), `2` configuration error
+(e.g. missing key or password), `3` storage unavailable.
 
-## Konfiguracja
+## Configuration
 
-| zmienna | domyślna | opis |
+| variable | default | description |
 |---|---|---|
-| `POCKET_API_KEY` | — | klucz `pk_...`, wymagany (albo `POCKET_API_KEY_FILE`) |
-| `POCKET_API_BASE` | `https://public.heypocketai.com/api/v1` | bazowy adres API |
-| `META_DIR` | `/data/meta/pocket` | drzewo metadanych |
-| `STATE_DIR` | `/data/state` | baza stanu i logi |
-| `AUDIO_DIR` | `/audio` | drzewo audio |
-| `DOWNLOAD_AUDIO` | `true` | `false` pomija pobieranie audio |
-| `SYNC_INTERVAL_MINUTES` | `15` | odstęp między przebiegami |
-| `RUN_ONCE` | `false` | jeden przebieg i wyjście |
-| `MAX_CONCURRENCY` | `3` | równolegle przetwarzane nagrania |
-| `FULL_REFRESH_HOURS` | `24` | co ile ponownie pobrać szczegóły wszystkich nagrań (0 = wyłączone) |
-| `TZ` | `UTC` | strefa czasowa w nazwach katalogów |
+| `POCKET_API_KEY` | — | `pk_...` key, required for the sync (or `POCKET_API_KEY_FILE`) |
+| `POCKET_API_BASE` | `https://public.heypocketai.com/api/v1` | API base URL |
+| `META_DIR` | `/data/meta/pocket` | metadata tree |
+| `STATE_DIR` | `/data/state` | state DB, runtime settings and logs |
+| `AUDIO_DIR` | `/audio` | audio tree |
+| `DOWNLOAD_AUDIO` | `true` | `false` skips audio downloads (editable in the UI) |
+| `SYNC_INTERVAL_MINUTES` | `15` | time between passes (editable in the UI) |
+| `RUN_ONCE` | `false` | run one pass and exit |
+| `MAX_CONCURRENCY` | `3` | recordings processed in parallel (editable in the UI) |
+| `FULL_REFRESH_HOURS` | `24` | how often to re-fetch details of every recording, 0 = off (editable in the UI) |
+| `SYNC_PAUSED` | `false` | skip scheduled passes (usually toggled in the UI) |
+| `TZ` | `UTC` | time zone for directory names and the UI |
 | `LOG_LEVEL` | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `LOG_FORMAT` | `json` | `json` albo `console` |
-| `LOG_TO_FILE` | `false` | dodatkowo `STATE_DIR/logs/pocket-sync.log` (rotacja 5×10 MB) |
+| `LOG_FORMAT` | `json` | `json` or `console` |
+| `LOG_TO_FILE` | `false` | also log to `STATE_DIR/logs/pocket-sync.log` (rotated, 5×10 MB) |
+| `WEB_PASSWORD` | — | web UI master password, required for the UI (or `WEB_PASSWORD_FILE`) |
+| `WEB_PORT` | `8080` | web UI port (inside the container and on the host) |
+| `WEB_HOST` | `0.0.0.0` | web UI bind address |
+| `WEB_SESSION_HOURS` | `168` | how long a login lasts |
+| `WEB_COOKIE_SECURE` | `false` | `true` when the UI is served over HTTPS |
+| `WEB_SECRET_KEY` | derived from the password | key used to sign session cookies |
 
-## Układ archiwum
+## Archive layout
 
 ```
-dane   /data/meta/pocket/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
-           raw.json          pełna odpowiedź API (źródło prawdy)
-           transcript.json   segmenty z timestampami (i mówcami, jeśli są)
+data   /data/meta/pocket/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
+           raw.json          full API response (source of truth)
+           transcript.json   segments with timestamps (and speakers, when available)
            transcript.md
-           summary.md        wszystkie podsumowania AI
+           summary.md        all AI summaries
            actions.json      action items
-           .meta.json        ścieżka audio względem katalogu audio, SHA-256, rozmiar, hashe plików, wersja narzędzia
+           .meta.json        audio path relative to the audio dir, SHA-256, size, file hashes, tool version
        /data/state/pocket-sync.db
+       /data/state/settings.json   sync settings changed in the web UI (only when changed)
 
 audio  /audio/2026/09/2026-09-25_1140_aktualizacja-sql-server-2016-do-2019_desktop_1790329209135_lpmlvi/
            audio.ogg
 ```
 
-## Jak działa przebieg
+## How a pass works
 
-1. Sprawdza zapisywalność `META_DIR`, `STATE_DIR` i `AUDIO_DIR` (tylko gdy `DOWNLOAD_AUDIO=true`),
-   usuwa pliki `.part` starsze niż 24 h.
-2. Pobiera pełną listę nagrań (strony po 100).
-3. Do kolejki trafiają nagrania nowe, ze zmienioną pozycją listy (`updated_at`, tytuł, folder, tagi),
-   z niekompletnym przetwarzaniem po stronie Pocket, z audio innym niż `done`/`skipped` oraz te,
-   których szczegóły nie były pobierane od `FULL_REFRESH_HOURS`. Nagrania jeszcze przetwarzane
-   (`state != completed`) czekają.
-4. Dla każdego: szczegóły → `raw.json` → audio (świeży presigned URL, `.part`, SHA-256,
-   kontrola `Content-Length`, `os.replace` + `fsync`) → pliki pochodne → `.meta.json` → wiersz w bazie.
-   Pliki o niezmienionej treści nie są nadpisywane.
-5. Błąd jednego nagrania nie przerywa przebiegu. Po 5 kolejnych błędach nagranie jest logowane
-   jako `recording_needs_attention` i ponawiane coraz rzadziej (maks. raz na 24 h).
+1. Checks that `META_DIR`, `STATE_DIR` and `AUDIO_DIR` are writable (the latter only with
+   `DOWNLOAD_AUDIO=true`) and removes `.part` files older than 24 h.
+2. Fetches the full list of recordings (pages of 100).
+3. Queues recordings that are new, whose list entry changed (`updated_at`, title, folder, tags),
+   whose processing on the Pocket side is incomplete, whose audio is not `done`/`skipped`, and
+   those whose details were not fetched for `FULL_REFRESH_HOURS`. Recordings still being
+   processed (`state != completed`) wait.
+4. For each one: details → `raw.json` → audio (fresh presigned URL, `.part`, SHA-256,
+   `Content-Length` check, `os.replace` + `fsync`) → derived files → `.meta.json` → DB row.
+   Files whose content did not change are not rewritten.
+5. A failure of one recording does not stop the pass. After 5 consecutive failures a recording
+   is logged as `recording_needs_attention` and retried less and less often (at most once every
+   24 h). It is also listed on the web UI's Sync page, where **Retry** clears the backoff.
 
-Klient respektuje limit API (50 zapytań/min, nagłówki `X-Ratelimit-*`), ponawia 429/5xx
-z wykładniczym backoffem i `Retry-After`, a błędów 4xx nie ponawia.
+The client respects the API rate limit (50 requests/min, `X-Ratelimit-*` headers), retries 429/5xx
+with exponential backoff and `Retry-After`, and does not retry other 4xx errors.
 
-## Rozwój lokalny
+## Local development
 
 ```sh
 python -m venv .venv && .venv/bin/pip install -e ".[dev]"   # Windows: .venv\Scripts\pip
 .venv/bin/pytest
 
-# przebieg na laptopie bez audio, z kluczem z .env:
+# a pass on a laptop without audio, with the key from .env:
 META_DIR=./data/meta STATE_DIR=./data/state DOWNLOAD_AUDIO=false LOG_FORMAT=console \
   .venv/bin/python -m pocket_sync once
+
+# the web UI on http://localhost:8080 for the same data:
+META_DIR=./data/meta STATE_DIR=./data/state AUDIO_DIR=./data/audio WEB_PASSWORD=dev-password \
+  LOG_FORMAT=console .venv/bin/python -m pocket_sync web
 
 docker build -t pocket-sync .
 ```

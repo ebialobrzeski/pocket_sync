@@ -1,0 +1,36 @@
+{# Sync status card, also served alone by /settings/status for live refresh. #}
+{% set counts = status.counts %}
+<div class="status-grid">
+  <div class="stat">
+    <div class="stat-label">State</div>
+    <div class="stat-value">
+      {% if running and not running_stale %}<span class="dot dot-run"></span>Syncing
+      {% elif current.sync_paused %}<span class="dot dot-pause"></span>Paused
+      {% elif running_stale %}<span class="dot dot-err"></span>Not responding
+      {% else %}<span class="dot dot-ok"></span>Idle{% endif %}
+    </div>
+    <div class="stat-sub">
+      {% if running and not running_stale %}started {{ running['started_at'] | ago }}, last progress {{ running['heartbeat_at'] | ago }}
+      {% elif running_stale %}a pass started {{ running['started_at'] | ago }} made no progress since {{ running['heartbeat_at'] | ago }}. Is the sync container running?
+      {% elif sync_pending %}manual sync requested, waiting for the sync service…
+      {% elif next_run %}next pass {{ next_run | ago }} ({{ next_run | dt('%H:%M') }})
+      {% elif current.sync_paused %}scheduled passes are skipped; “Sync now” still runs one
+      {% else %}waiting for the first pass{% endif %}
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Last successful pass</div>
+    <div class="stat-value">{{ status.last_ok['finished_at'] | ago if status.last_ok else 'never' }}</div>
+    <div class="stat-sub">{% if status.last_ok %}{{ status.last_ok['finished_at'] | dt }}{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Recordings</div>
+    <div class="stat-value">{{ counts.get('total') or 0 }}</div>
+    <div class="stat-sub">{{ counts.get('audio_done') or 0 }} with audio · {{ counts.get('audio_bytes') | size }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Need attention</div>
+    <div class="stat-value {{ 'text-error' if status.attention }}">{{ status.attention | length }}</div>
+    <div class="stat-sub">recordings with sync errors</div>
+  </div>
+</div>

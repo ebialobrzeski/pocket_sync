@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}{{ rec.title }} · Pocket archive{% endblock %}
+{% block content %}
+<a class="back" href="/">← All recordings</a>
+<div class="rec-head">
+  <div>
+    <h1>{{ rec.title }}</h1>
+    <div class="rec-meta">
+      <span>{{ rec.recorded_at | dt('%A, %d %B %Y · %H:%M') }}</span>
+      <span>{{ rec.duration | span }}</span>
+      {% if rec.language %}<span>{{ rec.language }}</span>{% endif %}
+      {% if rec.folder %}<span class="tag">{{ rec.folder }}</span>{% endif %}
+      {% for t in rec.tags %}<span class="tag">{{ t }}</span>{% endfor %}
+    </div>
+  </div>
+  <form method="post" action="/recordings/{{ rec.id | urlencode }}/resync" data-confirm="Fetch this recording from Pocket again in the next sync pass?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <button class="btn btn-ghost" type="submit" title="Re-fetch transcript, summary and missing audio from Pocket">Re-sync</button>
+  </form>
+</div>
+
+{% if rec.problem %}<div class="flash flash-error">{{ rec.problem }}</div>{% endif %}
+{% if rec.row['last_error'] %}<div class="flash flash-error">Last sync error ({{ rec.row['error_count'] }}×): {{ rec.row['last_error'] }}</div>{% endif %}
+
+<div class="player card" id="player-bar">
+  {% if rec.has_audio %}
+  <audio id="player" controls preload="metadata" src="/recordings/{{ rec.id | urlencode }}/audio"></audio>
+  <div class="player-tools">
+    <button class="btn btn-sm" type="button" data-skip="-15" title="Back 15 s">−15 s</button>
+    <button class="btn btn-sm" type="button" data-skip="15" title="Forward 15 s">+15 s</button>
+    <label class="select-sm">Speed
+      <select id="speed">
+        {% for s in ['0.75', '1', '1.25', '1.5', '1.75', '2'] %}<option value="{{ s }}" {{ 'selected' if s == '1' }}>{{ s }}×</option>{% endfor %}
+      </select>
+    </label>
+    {% if rec.segments %}
+    <label class="check"><input type="checkbox" id="follow" checked><span>Follow transcript</span></label>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted no-audio">
+    {% if rec.row['audio_status'] == 'done' %}The audio file is missing from the audio directory.
+    {% elif rec.row['audio_status'] == 'skipped' %}This recording has no audio file in Pocket.
+    {% else %}Audio not downloaded (status: {{ rec.row['audio_status'] }}).{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="rec-grid">
+  <div class="col">
+    <section class="card">
+      <h2>Summary</h2>
+      {% for s in rec.summaries %}
+        {% if rec.summaries | length > 1 %}<div class="summary-label">Summary {{ loop.index }}{% if s.created_at %} · {{ s.created_at | dt }}{% endif %}</div>{% endif %}
+        <div class="prose">{{ s.html | safe }}</div>
+      {% else %}
+        <p class="muted">No summary {{ 'yet' if rec.row['meta_status'] == 'pending' else 'available' }}.</p>
+      {% endfor %}
+    </section>
+
+    {% if rec.actions %}
+    <section class="card">
+      <h2>Action items <span class="muted count">{{ rec.actions | length }}</span></h2>
+      <ul class="actions">
+        {% for a in rec.actions %}
+        {% set done = a.get('isCompleted') or a.get('is_completed') or (a.get('status') or '') | upper in ['DONE', 'COMPLETED'] %}
+        <li class="{{ 'done' if done }}">
+          <span class="tick" aria-label="{{ 'done' if done else 'open' }}">{{ '✓' if done else '' }}</span>
+          <div>
+            <div class="action-label">{{ a.get('label') or a.get('title') or a.get('text') or '(untitled)' }}</div>
+            {% if a.get('context') %}<div class="muted small">{{ a.get('context') }}</div>{% endif %}
+            <div class="rec-meta small">
+              {% if a.get('priority') %}<span class="badge badge-muted">{{ a.get('priority') }}</span>{% endif %}
+              {% if a.get('dueDate') %}<span>due {{ a.get('dueDate') | dt('%Y-%m-%d') }}</span>{% endif %}
+              {% if a.get('assignee') %}<span>{{ a.get('assignee') }}</span>{% endif %}
+            </div>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+
+    <section class="card">
+      <h2>Details</h2>
+      <dl class="kv">
+        <dt>Recording ID</dt><dd><code>{{ rec.id }}</code></dd>
+        <dt>Directory</dt><dd><code>{{ rec.row['rel_dir'] }}</code></dd>
+        <dt>Metadata</dt><dd>{{ rec.row['meta_status'] }}</dd>
+        <dt>Audio</dt><dd>{{ rec.row['audio_status'] }}{% if rec.row['audio_bytes'] %} · {{ rec.row['audio_bytes'] | size }}{% endif %}{% if rec.row['audio_file'] %} · <code>{{ rec.row['audio_file'] }}</code>{% endif %}</dd>
+        {% if rec.row['audio_sha256'] %}<dt>SHA-256</dt><dd><code class="wrap-any">{{ rec.row['audio_sha256'] }}</code></dd>{% endif %}
+        <dt>Last synced</dt><dd>{{ rec.row['last_synced_at'] | dt }} ({{ rec.row['last_synced_at'] | ago }})</dd>
+      </dl>
+      {% if rec.files or rec.has_audio %}
+      <div class="files">
+        {% if rec.has_audio %}<a class="btn btn-sm" href="/recordings/{{ rec.id | urlencode }}/audio" download>Audio</a>{% endif %}
+        {% for name, size in rec.files %}
+        <a class="btn btn-sm" href="/recordings/{{ rec.id | urlencode }}/files/{{ name }}" target="_blank" rel="noopener">{{ name }} <span class="muted">{{ size | size }}</span></a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </section>
+  </div>
+
+  <section class="card col transcript-card">
+    <div class="transcript-head">
+      <h2>Transcript</h2>
+      {% if rec.segments %}<input type="search" id="transcript-filter" placeholder="Find in transcript…" aria-label="Find in transcript">{% endif %}
+    </div>
+    {% if rec.segments %}
+    <ol class="transcript" id="transcript">
+      {% set ns = namespace(prev=None) %}
+      {% for s in rec.segments %}
+      <li class="seg" data-start="{{ s.start }}">
+        {% if s.speaker and s.speaker != ns.prev %}<div class="speaker">{{ s.speaker }}</div>{% endif %}
+        {% set ns.prev = s.speaker %}
+        <button type="button" class="ts" {{ 'disabled' if not rec.has_audio }}>{{ s.start | timestamp }}</button>
+        <span class="seg-text">{{ s.text }}</span>
+      </li>
+      {% endfor %}
+    </ol>
+    {% elif rec.transcript_text %}
+    <div class="prose"><p>{{ rec.transcript_text }}</p></div>
+    {% else %}
+    <p class="muted">No transcript available.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

@@ -39,6 +39,19 @@ class Settings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
     log_to_file: bool = False
 
+    # Sync loop keeps running but skips scheduled passes (a "sync now" request still runs one).
+    # Usually toggled from the web UI rather than the environment.
+    sync_paused: bool = False
+
+    # Web UI (`python -m pocket_sync web`)
+    web_password: SecretStr | None = None
+    web_password_file: Path | None = None
+    web_secret_key: SecretStr | None = None  # signs session cookies; derived from the password if unset
+    web_host: str = "0.0.0.0"
+    web_port: int = Field(8080, ge=1, le=65535)
+    web_session_hours: float = Field(24 * 7, gt=0)
+    web_cookie_secure: bool = False  # set true when the UI is served over HTTPS
+
     @field_validator("log_level", "log_format", mode="before")
     @classmethod
     def _normalize_case(cls, v: object) -> object:
@@ -85,6 +98,25 @@ class Settings(BaseSettings):
         if not key.startswith("pk_"):
             raise ConfigError("POCKET_API_KEY looks invalid: expected a key starting with 'pk_'.")
         return key
+
+    def web_password_value(self) -> str:
+        """Return the web UI master password or raise ConfigError with a readable message."""
+        password = self.web_password.get_secret_value() if self.web_password else ""
+        if not password and self.web_password_file:
+            try:
+                password = self.web_password_file.read_text(encoding="utf-8").strip()
+            except OSError as e:
+                raise ConfigError(
+                    f"cannot read WEB_PASSWORD_FILE {self.web_password_file}: {e.strerror}"
+                ) from e
+        if not password:
+            raise ConfigError(
+                "WEB_PASSWORD is not set. Put a master password in .env (see .env.example) "
+                "or point WEB_PASSWORD_FILE at a Docker secret."
+            )
+        if len(password) < 8:
+            raise ConfigError("WEB_PASSWORD is too short: use at least 8 characters.")
+        return password
 
 
 def load_settings(**overrides: object) -> Settings:
